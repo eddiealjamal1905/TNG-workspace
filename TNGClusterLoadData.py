@@ -28,6 +28,7 @@ minSatMass = 1e10 # Minimum stellar mass for a subhalo to be
 starBCGDistCut = 100 # The distance threshold to consider stellar mass
                      # of BCG i.e. the central galaxy. UNITS: kpc
 hotGasTemp = 1e6 # Temperature for gas to be considered hot. UNITS: Kelvin.
+coldGasTemp = 1e4 # Temperature for gas to be considered cold. UNITS: Kelvin.
 # initialize snap, redshift, and scale_factor.
 snap = 99
 redshift = snapRedshift[snap]
@@ -38,6 +39,7 @@ K_B = 1.380649*10**(-16) # Boltzmann constant. UNITS: CGS (erg/K)
 gamma = 5/3 # Thermodynamic adiabatic index
 X_H = 0.76 # Hydrogen fraction
 Mass_of_proton = 1.67262192369*10**-(24) # Mass of proton. UNITs: grams
+solar_Z = 0.0127 # primordial solar metallicity
 
 ##### Target simulation and snapshot/redshift from which to extract data.
 # Simulation options: "TNG-Cluster", "TNG300-1", "TNG300-2", "TNG300-3".
@@ -52,9 +54,11 @@ filePath = f"/virgotng/mpia/TNG-Cluster/L680n8192TNG/output" # sim file path
 haloFields = ['GroupMass', 'GroupFirstSub', 'GroupPos',
               'GroupVel', 'GroupMassType', 'Group_M_Crit200',
               'Group_M_Crit500','Group_R_Crit200', 'Group_R_Crit500',
+              'GroupSFR', 'GroupStarMetallicity',
               'GroupContaminationFracByMass', 'GroupContaminationFracByNumPart',
               'GroupOrigHaloID', 'GroupPrimaryZoomTarget']
 subhaloFields = ['SubhaloMass', 'SubhaloGrNr', 'SubhaloMassType',
+                 'SubhaloSFR', 'SubhaloStarMetallicity',
                  'SubhaloPos', 'SubhaloSpin', 'SubhaloVel']
 gasFields = ['Coordinates', 'Density', 'ElectronAbundance', 
              'InternalEnergy', 'Masses',]
@@ -140,6 +144,9 @@ def loadHaloDF():
     haloR200 = halos['Group_R_Crit200'] * scale_factor/little_h #ckpc/h -> kpc
     haloR500 = halos['Group_R_Crit500'] * scale_factor/little_h
 
+    halospecSFR = halos['GroupSFR']/haloMass
+    haloMetallicity = halos['GroupStarMetallicity']/solar_Z
+
     contamByMass = halos['GroupContaminationFracByMass']
     contamByPart = halos['GroupContaminationFracByNumPart']
     origID = halos['GroupOrigHaloID']
@@ -159,11 +166,13 @@ def loadHaloDF():
     haloKeys = ['contam_mass', 'contam_part', 'Original ID', 'Zoom target',
                 'M_tot', 'M_200c', 'M_500c', 'R_200c', 'R_500c', 'M_gas',
                 'M_dm', 'M_star', 'M_bh', 'pos_x', 'pos_y',
-                'pos_z', 'vel_x', 'vel_y', 'vel_z', 'BCG ID']
+                'pos_z', 'vel_x', 'vel_y', 'vel_z',
+                'sSFR', 'Metallicity', 'BCG ID']
     haloVals = [contamByMass, contamByPart, origID, zoomTarget,
                 haloMass, haloM200, haloM500, haloR200, haloR500, haloGasMass,
                 haloDMMass, haloStarMass, haloBHMass, haloPosX, haloPosY,
-                haloPosZ, haloVelX, haloVelY, haloVelZ, centGalaxyID]
+                haloPosZ, haloVelX, haloVelY, haloVelZ,
+                halospecSFR, haloMetallicity, centGalaxyID]
     dfHalos = pd.DataFrame(dict(zip(haloKeys, haloVals)))
     
     # Add a column to the halo DataFrame for the interger halo IDs which
@@ -173,9 +182,10 @@ def loadHaloDF():
     dfHalos.rename(columns = {'index': 'Halo ID'}, inplace = True)
 
     # Use a log mass scale.
-    dfHalos[['M_tot', 'M_500c', 'M_200c', 'M_gas','M_dm', 'M_star', 
-             'M_bh']] = dfHalos[['M_tot', 'M_500c', 'M_200c', 'M_gas', 'M_dm', 
-                                 'M_star', 'M_bh']].apply(np.log10, axis = 0)
+    dfHalos[['M_tot', 'M_500c', 'M_200c', 'M_gas','M_dm', 'M_star', 'M_bh', 
+             'sSFR']] = dfHalos[['M_tot', 'M_500c', 'M_200c', 'M_gas', 'M_dm', 
+                                 'M_star', 'M_bh', 'sSFR']].apply(np.log10, 
+                                                                  axis = 0)
 
     return dfHalos
 
@@ -210,6 +220,9 @@ def loadSubDF():
                                                                   # -> M_sun
     subPos = subhalos['SubhaloPos'] * scale_factor/little_h # ckpc/h -> kpc
 
+    subspecSFR = subhalos['SubhaloSFR']/subMass
+    subMetallicity = subhalos['SubhaloStarMetallicity']/solar_Z
+
     # Split different dimensions of subhalo position.
     subPosX, subPosY, subPosZ = subPos[:, 0], subPos[:, 1], subPos[:, 2]
 
@@ -223,8 +236,10 @@ def loadSubDF():
     # Create subhalo DataFrame using the above subhalo data extracted from
     # the simulation.
     subKeys = ['M_tot', 'M_gas', 'M_dm', 'M_star', 'M_bh',
+               'sSFR', 'Metallicity', 
                'pos_x', 'pos_y', 'pos_z', 'Parent ID']
     subVals = [subMass, subGasMass, subDMMass, subStarMass, subBHMass,
+               subspecSFR, subMetallicity,
                subPosX, subPosY, subPosZ, subParentID]
 
     dfSubs = pd.DataFrame(dict(zip(subKeys, subVals)))
@@ -235,9 +250,10 @@ def loadSubDF():
     dfSubs.rename(columns = {'index': 'Subhalo ID'}, inplace = True)
 
     # Use a log mass scale.
-    dfSubs[['M_tot', 'M_gas', 'M_dm', 'M_star',
-            'M_bh']] = dfSubs[['M_tot', 'M_gas','M_dm', 'M_star', 
-                               'M_bh']].apply(np.log10, axis = 1)
+    dfSubs[['M_tot', 'M_gas', 'M_dm', 'M_star', 
+            'M_bh', 'sSFR']] = dfSubs[['M_tot', 'M_gas','M_dm', 'M_star', 
+                                       'M_bh', 'sSFR']].apply(np.log10, 
+                                                              axis = 1)
     
     return dfSubs
 
@@ -487,11 +503,15 @@ if __name__ == "__main__":
         starIn200 = np.where(haloStarDistFromHalo < R200)
         hotGasIn200 = np.where((haloGasDistFromHalo < R200) 
                                & (gasTemp > hotGasTemp))
+        coldGasIn200 = np.where((haloGasDistFromHalo < R200) 
+                               & (gasTemp < coldGasTemp))
 
         dfHalos.loc[row, 'M_star_200c'] = np.log10(np.sum(starMass[starIn200]))
         dfHalos.loc[row, 'M_gas_200c'] = np.log10(np.sum(gasMass[gasIn200]))
         dfHalos.loc[row, 'M_gas_200c_hot'] = \
             np.log10(np.sum(gasMass[hotGasIn200]))
+        dfHalos.loc[row, 'M_gas_200c_cold'] = \
+            np.log10(np.sum(gasMass[coldGasIn200]))
         # If there is no gas in the halo (i.e. gas mass is zero), then 
         # the weights will all some to zero and we will get a ZeroDivisionError.
         try:
