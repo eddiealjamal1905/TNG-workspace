@@ -497,6 +497,14 @@ if __name__ == "__main__":
                                                     haloID = haloID)
         starMass, haloStarDistFromHalo, _ = loadStarData(position, 
                                                          haloID = haloID)
+        
+        R500 = dfHalos.loc[row, 'R_500c']
+        gasIn500 = np.where(haloGasDistFromHalo < R500)
+        starIn500 = np.where(haloStarDistFromHalo < R500)
+        hotGasIn500 = np.where((haloGasDistFromHalo < R500) 
+                               & (gasTemp > hotGasTemp))
+        coldGasIn500 = np.where((haloGasDistFromHalo < R500) 
+                               & (gasTemp < coldGasTemp))
 
         R200 = dfHalos.loc[row, 'R_200c']
         gasIn200 = np.where(haloGasDistFromHalo < R200)
@@ -505,15 +513,30 @@ if __name__ == "__main__":
                                & (gasTemp > hotGasTemp))
         coldGasIn200 = np.where((haloGasDistFromHalo < R200) 
                                & (gasTemp < coldGasTemp))
-
+        
+        dfHalos.loc[row, 'M_star_500c'] = np.log10(np.sum(starMass[starIn500]))
+        dfHalos.loc[row, 'M_gas_500c'] = np.log10(np.sum(gasMass[gasIn500]))
+        dfHalos.loc[row, 'M_gas_500c_hot'] = \
+            np.log10(np.sum(gasMass[hotGasIn500]))
+        dfHalos.loc[row, 'M_gas_500c_cold'] = \
+            np.log10(np.sum(gasMass[coldGasIn500]))
+    
         dfHalos.loc[row, 'M_star_200c'] = np.log10(np.sum(starMass[starIn200]))
         dfHalos.loc[row, 'M_gas_200c'] = np.log10(np.sum(gasMass[gasIn200]))
         dfHalos.loc[row, 'M_gas_200c_hot'] = \
             np.log10(np.sum(gasMass[hotGasIn200]))
         dfHalos.loc[row, 'M_gas_200c_cold'] = \
             np.log10(np.sum(gasMass[coldGasIn200]))
+        
         # If there is no gas in the halo (i.e. gas mass is zero), then 
         # the weights will all some to zero and we will get a ZeroDivisionError.
+        try:
+            dfHalos.loc[row, 'avg_temp_M500c'] = \
+                np.log10(np.average(gasTemp[gasIn500], 
+                                    weights = gasMass[gasIn500]))
+        except ZeroDivisionError:
+            dfHalos.loc[row, 'avg_temp_M500c'] = float("-inf")
+        
         try:
             dfHalos.loc[row, 'avg_temp_M200c'] = \
                 np.log10(np.average(gasTemp[gasIn200], 
@@ -526,7 +549,7 @@ if __name__ == "__main__":
     dfSubs = loadSubDF()
     # Merge halo DataFrame and subhalo DataFrame based on the the halo ID and
     # subhalo Parent ID (describing what halo this subhalo belongs to).
-    dfSubs = dfSubs.merge(dfHalos[['Halo ID', 'R_200c', 'BCG ID']],
+    dfSubs = dfSubs.merge(dfHalos[['Halo ID', 'R_500c', 'R_200c', 'BCG ID']],
                           how = 'inner', left_on = 'Parent ID', 
                           right_on = 'Halo ID')
     # Create a new column in subhal DataFrame that describes if this
@@ -538,11 +561,14 @@ if __name__ == "__main__":
     dfSubs.drop(labels = ['Halo ID', 'BCG ID'], axis = 1, inplace = True)
     dfSubs.set_index(np.arange(len(dfSubs)), inplace = True)
 
-    for row, (haloID, 
-              R200c, subID) in tqdm(enumerate((zip(dfSubs['Parent ID'], 
-                                                   dfSubs['R_200c'], 
-                                                   dfSubs['Subhalo ID']))),
-                                                   total = len(dfSubs)):
+    for (row, 
+         (haloID, R500c, 
+          R200c, subID)) in tqdm(enumerate((zip(dfSubs['Parent ID'], 
+                                                dfSubs['R_500c'], 
+                                                dfSubs['R_200c'], 
+                                                dfSubs['Subhalo ID']))), 
+                                                total = len(dfSubs)):
+        
         position = (dfSubs.loc[row, 'pos_x'], dfSubs.loc[row, 'pos_y'], 
                     dfSubs.loc[row, 'pos_z'])
         (subStarMass, subStarDistFromHalo, 
@@ -550,14 +576,17 @@ if __name__ == "__main__":
                                                haloID = haloID)
         
         starInBCGCut = np.where(subStarDistFromSub < starBCGDistCut)
+        starInR500c = np.where(subStarDistFromHalo < R500c)
         starInR200c = np.where(subStarDistFromHalo < R200c)
 
         dfSubs.loc[row, 'M_star_tot'] = np.log10(np.sum(subStarMass))
         dfSubs.loc[row, f'M_star_{starBCGDistCut}kpc'] = \
             np.log10(np.sum(subStarMass[starInBCGCut]))
+        dfSubs.loc[row, 'M_star_in_R500c'] = \
+            np.log10(np.sum(subStarMass[starInR500c]))
         dfSubs.loc[row, 'M_star_in_R200c'] = \
             np.log10(np.sum(subStarMass[starInR200c]))
-
+        
     # Save the resultant DataFrames.
     dfHalos.to_csv(f'{simulation}-halo-catalog-snap{snap:02d}.csv',
                    index = False)
